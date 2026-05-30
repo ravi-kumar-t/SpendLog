@@ -13,6 +13,17 @@ object SmsParser {
     fun cleanMerchant(raw: String): String {
         var name = raw.trim()
 
+        val lowerName = name.lowercase()
+        if (lowerName.contains(" from ")) {
+            name = name.substring(0, lowerName.indexOf(" from "))
+        } else if (lowerName.contains(" via ")) {
+            name = name.substring(0, lowerName.indexOf(" via "))
+        } else if (lowerName.contains(" using ")) {
+            name = name.substring(0, lowerName.indexOf(" using "))
+        } else if (lowerName.contains(" on ")) {
+            name = name.substring(0, lowerName.indexOf(" on "))
+        }
+
         // If it starts with "to " or "at ", strip it
         if (name.lowercase().startsWith("to ")) {
             name = name.substring(3)
@@ -68,12 +79,18 @@ object SmsParser {
     fun parseSms(message: String): ParsedTransaction? {
         if (message.isBlank()) return null
 
+        val lowerMessage = message.lowercase()
+        // Check if there are any transactional keywords
+        val keywords = listOf("debited", "spent", "paid", "payment of", "sent", "transaction", "alert", "pymt", "credited", "transfer")
+        val hasKeyword = keywords.any { lowerMessage.contains(it) } || message.contains("₹") || message.contains("Rs") || message.contains("Rs.")
+        if (!hasKeyword) return null
+
         // 1. Extract Amount
-        // Match things like: Rs. 20.00, INR 500, Rs250, ₹120.00, Debited: 200.00, or raw 50.00
         val amountRegexes = listOf(
-            Regex("(?i)(?:INR|Rs\\.?|₹|Rs)\\s*([0-9,]+\\.[0-9]{2})"),
-            Regex("(?i)(?:INR|Rs\\.?|₹|Rs)\\s*([0-9,]+)"),
-            Regex("(?i)(?:debited|spent|paid|payment of)\\s*(?:INR|Rs\\.?|₹|Rs)?\\s*([0-9,]+\\.[0-9]{2})"),
+            Regex("(?i)(?:INR|Rs\\.?|₹)\\s*([0-9,]+\\.[0-9]{1,2})"),
+            Regex("(?i)(?:INR|Rs\\.?|₹)\\s*([0-9,]+)"),
+            Regex("(?i)(?:debited|spent|paid|payment of|pymt of|sent)\\s+(?:by|of)?\\s*(?:INR|Rs\\.?|₹)?\\s*([0-9,]+\\.[0-9]{1,2})"),
+            Regex("(?i)(?:debited|spent|paid|payment of|pymt of|sent)\\s+(?:by|of)?\\s*(?:INR|Rs\\.?|₹)?\\s*([0-9,]+)"),
             Regex("\\b([0-9]+\\.[0-9]{2})\\b")
         )
 
@@ -106,12 +123,12 @@ object SmsParser {
         }
 
         if (merchant.isEmpty()) {
-            // Regex to match "to [Merchant]", "at [Merchant]", or "vendor [Merchant]" up to next punctuation/standard markers
-            // E.g., "Debited: INR 20.00 at Arun Dabha" -> "Arun Dabha"
             val patternPhrases = listOf(
+                Regex("(?i)\\bto\\s+vendor\\s+([^\\s,.;]+(?:\\s+[^\\s,.;]+){0,3})"),
+                Regex("(?i)@\\s*UPI:?\\s*([^\\s,.;]+(?:\\s+[^\\s,.;]+){0,3})"),
+                Regex("(?i)@\\s*([^\\s,.;]+(?:\\s+[^\\s,.;]+){0,3})"),
                 Regex("(?i)\\bto\\s+([^\\s,.;]+(?:\\s+[^\\s,.;]+){0,3})"),
                 Regex("(?i)\\bat\\s+([^\\s,.;]+(?:\\s+[^\\s,.;]+){0,3})"),
-                Regex("(?i)\\bvendor\\s+([^\\s,.;]+(?:\\s+[^\\s,.;]+){0,3})"),
                 Regex("(?i)\\bpaying\\s+([^\\s,.;]+(?:\\s+[^\\s,.;]+){0,3})")
             )
 
@@ -128,7 +145,6 @@ object SmsParser {
         }
 
         if (merchant.isEmpty()) {
-            // Last resort: find any non-numeric text after money indicators
             merchant = "Unknown Merchant"
         }
 
@@ -144,37 +160,36 @@ object SmsParser {
     fun mapItemToCategory(item: String): String {
         val text = item.lowercase(Locale.ROOT)
         return when {
-            // Food & Drinks
-            text.contains("tea") || text.contains("chai") || text.contains("coffee") || 
-            text.contains("samosa") || text.contains("lunch") || text.contains("dinner") || 
-            text.contains("breakfast") || text.contains("pizza") || text.contains("burger") || 
-            text.contains("food") || text.contains("drinks") || text.contains("snack") || 
-            text.contains("maggi") || text.contains("restaurant") || text.contains("hotel") ||
-            text.contains("cafe") || text.contains("roll") || text.contains("sweets") ||
-            text.contains("biryani") || text.contains("starbucks") || text.contains("mcd") -> "Food & Drinks"
+            // Food & Drinks: tea, coffee, samosa, lunch, dinner, maggie, chai, snacks, cafe (+ original extensions)
+            text.contains("tea") || text.contains("coffee") || text.contains("samosa") || 
+            text.contains("lunch") || text.contains("dinner") || text.contains("maggie") || 
+            text.contains("maggi") || text.contains("chai") || text.contains("snacks") || 
+            text.contains("snack") || text.contains("cafe") || text.contains("breakfast") || 
+            text.contains("pizza") || text.contains("burger") || text.contains("food") || 
+            text.contains("drinks") || text.contains("restaurant") || text.contains("hotel") ||
+            text.contains("roll") || text.contains("sweets") || text.contains("biryani") || 
+            text.contains("starbucks") || text.contains("mcd") -> "Food & Drinks"
 
-            // Shopping
-            text.contains("shirt") || text.contains("pant") || text.contains("jeans") || 
-            text.contains("shoes") || text.contains("pantaloons") || text.contains("dress") || 
-            text.contains("clothes") || text.contains("amazon") || text.contains("flipkart") || 
-            text.contains("myntra") || text.contains("shopping") || text.contains("mall") ||
-            text.contains("gift") || text.contains("bag") || text.contains("watch") -> "Shopping"
-
-            // Travel / Transport
-            text.contains("fuel") || text.contains("petrol") || text.contains("diesel") || 
+            // Travel & Transport: uber, ola, auto, metro, petrol, fuel, rapido, train, cab (+ original extensions)
             text.contains("uber") || text.contains("ola") || text.contains("auto") || 
-            text.contains("cab") || text.contains("taxi") || text.contains("train") || 
-            text.contains("bus") || text.contains("ticket") || text.contains("metro") || 
-            text.contains("flight") || text.contains("rapido") -> "Travel & Transport"
+            text.contains("metro") || text.contains("petrol") || text.contains("fuel") || 
+            text.contains("rapido") || text.contains("train") || text.contains("cab") || 
+            text.contains("diesel") || text.contains("taxi") || text.contains("bus") || 
+            text.contains("ticket") || text.contains("flight") -> "Travel & Transport"
 
-            // Groceries
-            text.contains("milk") || text.contains("egg") || text.contains("vegetables") || 
-            text.contains("fruits") || text.contains("grocery") || text.contains("groceries") || 
-            text.contains("mart") || text.contains("supermarket") || text.contains("d-mart") ||
-            text.contains("blinkit") || text.contains("zepto") || text.contains("bigbasket") ||
-            text.contains("bread") || text.contains("butter") -> "Groceries"
+            // Groceries & Shopping: dmart, blinkit, instamart, milk, vegetables, clothes, amazon (+ original extensions)
+            text.contains("dmart") || text.contains("d-mart") || text.contains("blinkit") || 
+            text.contains("instamart") || text.contains("milk") || text.contains("vegetables") || 
+            text.contains("clothes") || text.contains("amazon") || text.contains("grocery") || 
+            text.contains("groceries") || text.contains("shopping") || text.contains("mart") || 
+            text.contains("supermarket") || text.contains("zepto") || text.contains("bigbasket") || 
+            text.contains("bread") || text.contains("butter") || text.contains("shirt") || 
+            text.contains("pant") || text.contains("jeans") || text.contains("shoes") || 
+            text.contains("pantaloons") || text.contains("dress") || text.contains("flipkart") || 
+            text.contains("myntra") || text.contains("mall") || text.contains("gift") || 
+            text.contains("bag") || text.contains("watch") -> "Groceries & Shopping"
 
-            // Bills / Utilities
+            // Bills & Utilities
             text.contains("recharge") || text.contains("electricity") || text.contains("water") || 
             text.contains("wifi") || text.contains("internet") || text.contains("netflix") || 
             text.contains("spotify") || text.contains("youtube") || text.contains("rent") || 
@@ -186,8 +201,8 @@ object SmsParser {
             text.contains("pharmacy") || text.contains("clinic") || text.contains("medical") || 
             text.contains("tablet") || text.contains("health") || text.contains("syrup") -> "Medical & Healthcare"
 
-            // Defaults to Others
-            else -> "Others"
+            // Defaults to Other
+            else -> "Other"
         }
     }
 }

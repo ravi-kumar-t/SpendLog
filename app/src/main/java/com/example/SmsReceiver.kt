@@ -26,18 +26,19 @@ class SmsReceiver : BroadcastReceiver() {
 
                 if (isTransactional) {
                     val parsed = SmsParser.parseSms(body)
-                    if (parsed != null && parsed.amount > 0.0f) {
-                        try {
-                            val serviceIntent = Intent(context, OverlayService::class.java).apply {
-                                putExtra("extracted_amount", parsed.amount)
-                                putExtra("extracted_merchant", parsed.cleanedMerchant)
-                                putExtra("amount", parsed.amount)
-                                putExtra("merchant", parsed.cleanedMerchant)
-                            }
-                            context.startService(serviceIntent)
-                        } catch (e: Exception) {
-                            Log.e("SmsReceiver", "Error starting OverlayService: ${e.message}")
+                    val amount = parsed?.amount ?: 0.0f
+                    val merchant = if (parsed != null && parsed.cleanedMerchant != "Unknown Merchant") parsed.cleanedMerchant else ""
+                    
+                    try {
+                        val serviceIntent = Intent(context, OverlayService::class.java).apply {
+                            putExtra("extracted_amount", amount)
+                            putExtra("extracted_merchant", merchant)
+                            putExtra("amount", amount)
+                            putExtra("merchant", merchant)
                         }
+                        context.startService(serviceIntent)
+                    } catch (e: Exception) {
+                        Log.e("SmsReceiver", "Error starting OverlayService: ${e.message}")
                     }
                 }
             }

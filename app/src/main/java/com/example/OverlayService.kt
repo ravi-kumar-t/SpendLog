@@ -398,7 +398,7 @@ fun OverlayPopupScreen(
                 modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
             )
 
-            val categories = listOf("Food & Drinks", "Groceries", "Travel & Transport", "Shopping", "Bills & Utilities")
+            val categories = listOf("Food & Drinks", "Groceries & Shopping", "Travel & Transport", "Bills & Utilities", "Medical & Healthcare", "Other")
 
             Row(
                 modifier = Modifier
@@ -418,10 +418,10 @@ fun OverlayPopupScreen(
                             .clickable {
                                 val newText = when (cat) {
                                     "Food & Drinks" -> "Food / Drink"
-                                    "Groceries" -> "Grocery"
+                                    "Groceries & Shopping" -> "Grocery / Shopping"
                                     "Travel & Transport" -> "Fuel Travel"
-                                    "Shopping" -> "Shopping Product"
                                     "Bills & Utilities" -> "Recharge Bill"
+                                    "Medical & Healthcare" -> "Pharmacy Medical"
                                     else -> "Item"
                                 }
                                 itemDescriptionValue = TextFieldValue(

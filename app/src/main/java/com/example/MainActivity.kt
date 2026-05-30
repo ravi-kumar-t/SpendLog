@@ -91,12 +91,54 @@ fun ExpenseTrackerDashboard(
 ) {
     val transactionList by viewModel.transactions.collectAsStateWithLifecycle()
 
-    val totalExpense = remember(transactionList) {
-        transactionList.sumOf { it.amount.toDouble() }.toFloat()
+    val availableMonths = remember(transactionList) {
+        val months = mutableListOf<String>()
+        // Always include current month by default
+        val currentMonthStr = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
+        months.add(currentMonthStr)
+        
+        val sdfMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+        for (t in transactionList) {
+            val monthStr = sdfMonth.format(Date(t.timestamp))
+            if (!months.contains(monthStr)) {
+                months.add(monthStr)
+            }
+        }
+        months.distinct().sortedWith(compareByDescending {
+            try {
+                SimpleDateFormat("MMMM yyyy", Locale.getDefault()).parse(it) ?: Date(0)
+            } catch (e: Exception) {
+                Date(0)
+            }
+        })
     }
 
-    // Filter month total for standard dynamic displays
-    val currentMonthName = remember { viewModel.getFormattedMonthName() }
+    var selectedMonth by remember(availableMonths) {
+        mutableStateOf(availableMonths.firstOrNull() ?: SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date()))
+    }
+
+    val filteredTransactions = remember(transactionList, selectedMonth) {
+        val sdfMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+        transactionList.filter {
+            sdfMonth.format(Date(it.timestamp)) == selectedMonth
+        }
+    }
+
+    val totalExpense = remember(filteredTransactions) {
+        filteredTransactions.sumOf { it.amount.toDouble() }.toFloat()
+    }
+
+    val categorySums = remember(filteredTransactions) {
+        val sums = mutableMapOf<String, Float>()
+        val defaultCategories = listOf("Food & Drinks", "Groceries & Shopping", "Travel & Transport", "Bills & Utilities", "Medical & Healthcare", "Other")
+        defaultCategories.forEach { sums[it] = 0.0f }
+        
+        filteredTransactions.forEach { tx ->
+            val cat = tx.category
+            sums[cat] = (sums[cat] ?: 0.0f) + tx.amount
+        }
+        sums
+    }
 
     Column(
         modifier = modifier
@@ -122,13 +164,27 @@ fun ExpenseTrackerDashboard(
                         .fillMaxWidth()
                         .padding(24.dp)
                 ) {
-                    Text(
-                        text = "Monthly Spending",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF311005).copy(alpha = 0.7f)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Monthly Spending",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF311005).copy(alpha = 0.7f)
+                            )
                         )
-                    )
+                        
+                        // Month Selector Dropdown
+                        MonthSelector(
+                            selectedMonth = selectedMonth,
+                            availableMonths = availableMonths,
+                            onMonthSelected = { selectedMonth = it }
+                        )
+                    }
+                    
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "₹" + String.format(Locale.getDefault(), "%,.2f", totalExpense),
@@ -145,14 +201,14 @@ fun ExpenseTrackerDashboard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Badge 1: Transaction count
+                        // Badge 1: Transaction count using filtered list
                         Box(
                             modifier = Modifier
                                 .background(Color.White.copy(alpha = 0.4f), RoundedCornerShape(50))
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = "${transactionList.size} transactions",
+                                text = "${filteredTransactions.size} transactions",
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Medium,
                                     color = Color(0xFF311005)
@@ -167,7 +223,7 @@ fun ExpenseTrackerDashboard(
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = "$currentMonthName tracking",
+                                text = "$selectedMonth tracking",
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Medium,
                                     color = Color(0xFF311005)
@@ -179,11 +235,17 @@ fun ExpenseTrackerDashboard(
             }
         }
 
+        // --- Category Breakdown Panel (Progress Bars) ---
+        CategoryBreakdownSection(
+            categorySums = categorySums,
+            totalExpense = totalExpense
+        )
+
         // --- 3. Header & Clear Button ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 8.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -217,7 +279,7 @@ fun ExpenseTrackerDashboard(
         }
 
         // --- 4. LazyColumn List ---
-        if (transactionList.isEmpty()) {
+        if (filteredTransactions.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -242,7 +304,7 @@ fun ExpenseTrackerDashboard(
                         textAlign = TextAlign.Center
                     )
                     Text(
-                        text = "Transactions will automatically show up here as they are received via bank SMS notifications.",
+                        text = "Transactions for $selectedMonth will show up here.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
                         textAlign = TextAlign.Center,
@@ -259,7 +321,7 @@ fun ExpenseTrackerDashboard(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(
-                    items = transactionList,
+                    items = filteredTransactions,
                     key = { it.id }
                 ) { transaction ->
                     TransactionItem(
@@ -647,6 +709,167 @@ fun SlidingOverlay(
     }
 }
 
+@Composable
+fun MonthSelector(
+    selectedMonth: String,
+    availableMonths: List<String>,
+    onMonthSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    Box {
+        Surface(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .clickable { expanded = true },
+            color = Color.White.copy(alpha = 0.6f),
+            shape = RoundedCornerShape(50)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = selectedMonth,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF311005)
+                    )
+                )
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "Select Month",
+                    tint = Color(0xFF311005),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+        
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(Color(0xFFFDF8F6))
+        ) {
+            availableMonths.forEach { month ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = month,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (month == selectedMonth) FontWeight.Bold else FontWeight.Normal,
+                                color = Color(0xFF201A18)
+                            )
+                        )
+                    },
+                    onClick = {
+                        onMonthSelected(month)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CategoryBreakdownSection(
+    categorySums: Map<String, Float>,
+    totalExpense: Float,
+    modifier: Modifier = Modifier
+) {
+    val activeCategories = remember(categorySums) {
+        categorySums.filter { it.value > 0.0f }.toList().sortedByDescending { it.second }
+    }
+    
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFDF8F6)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEFE6E2))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "Category Breakdown",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF201A18),
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            
+            if (activeCategories.isEmpty()) {
+                Text(
+                    text = "No category data available for this month.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF85736B)
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    activeCategories.forEach { (category, sum) ->
+                        val percentage = if (totalExpense > 0f) (sum / totalExpense) else 0f
+                        
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = getEmojiForCategory(category),
+                                        fontSize = 16.sp
+                                    )
+                                    Text(
+                                        text = category,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF201A18)
+                                        )
+                                    )
+                                    Text(
+                                        text = "• ${String.format(Locale.getDefault(), "%.0f%%", percentage * 100)}",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = Color(0xFF85736B)
+                                        )
+                                    )
+                                }
+                                Text(
+                                    text = "₹${String.format(Locale.getDefault(), "%,.2f", sum)}",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF201A18)
+                                    )
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(4.dp))
+                            
+                            LinearProgressIndicator(
+                                progress = { percentage },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = getColorForCategory(category),
+                                trackColor = Color(0xFFF3E9E5)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Preset SMS Container Data class
 data class PresetSms(
     val label: String,
@@ -657,9 +880,10 @@ data class PresetSms(
 fun getEmojiForCategory(category: String): String {
     return when (category) {
         "Food & Drinks" -> "🍔"
+        "Groceries & Shopping" -> "🛒"
+        "Groceries" -> "🛒"
         "Shopping" -> "🛍️"
         "Travel & Transport" -> "🚗"
-        "Groceries" -> "🛒"
         "Bills & Utilities" -> "⚡"
         "Medical & Healthcare" -> "💊"
         else -> "🏷️"
@@ -669,9 +893,10 @@ fun getEmojiForCategory(category: String): String {
 fun getColorForCategory(category: String): Color {
     return when (category) {
         "Food & Drinks" -> Color(0xFFFF8A65) // Coral Orange
+        "Groceries & Shopping" -> Color(0xFF81C784) // Forest Green
+        "Groceries" -> Color(0xFF81C784) // Forest Green
         "Shopping" -> Color(0xFFBA68C8) // Violet Purple
         "Travel & Transport" -> Color(0xFF4FC3F7) // Sea Blue
-        "Groceries" -> Color(0xFF81C784) // Forest Green
         "Bills & Utilities" -> Color(0xFFFFD54F) // Gold Amber
         "Medical & Healthcare" -> Color(0xFFF06292) // Rose Pink
         else -> Color(0xFF90A4AE) // Slate Grey
