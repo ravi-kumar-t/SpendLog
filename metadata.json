@@ -1,0 +1,6 @@
+{
+  "name": "Expense Overlay",
+  "description": "Auto-Expense Overlay Tracker that captures transaction data, presents a focused typing overlay, and updates a smart merchant mapping database.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
