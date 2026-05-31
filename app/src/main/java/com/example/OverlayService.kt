@@ -131,6 +131,11 @@ class OverlayService : Service() {
                         },
                         onConfirm = { itemDescription, category ->
                             serviceScope.launch {
+                                val finalMerchant = if (category == "Personal Transfers") {
+                                    SmsParser.extractRecipientName(itemDescription, merchantCleaned)
+                                } else {
+                                    merchantCleaned
+                                }
                                 withContext(Dispatchers.IO) {
                                     repository.upsertMerchantMapping(
                                         MerchantMapping(
@@ -142,7 +147,7 @@ class OverlayService : Service() {
                                     repository.insertTransaction(
                                         Transaction(
                                             amount = amount,
-                                            merchant = merchantCleaned,
+                                            merchant = finalMerchant,
                                             item_description = itemDescription,
                                             category = category,
                                             timestamp = System.currentTimeMillis()
@@ -398,7 +403,7 @@ fun OverlayPopupScreen(
                 modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
             )
 
-            val categories = listOf("Food & Drinks", "Groceries & Shopping", "Travel & Transport", "Bills & Utilities", "Medical & Healthcare", "Other")
+            val categories = listOf("Food & Drinks", "Groceries & Shopping", "Travel & Transport", "Bills & Utilities", "Medical & Healthcare", "Personal Transfers", "Other")
 
             Row(
                 modifier = Modifier
@@ -422,6 +427,7 @@ fun OverlayPopupScreen(
                                     "Travel & Transport" -> "Fuel Travel"
                                     "Bills & Utilities" -> "Recharge Bill"
                                     "Medical & Healthcare" -> "Pharmacy Medical"
+                                    "Personal Transfers" -> "Send to Pavan"
                                     else -> "Item"
                                 }
                                 itemDescriptionValue = TextFieldValue(

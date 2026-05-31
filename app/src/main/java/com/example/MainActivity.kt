@@ -125,7 +125,9 @@ fun ExpenseTrackerDashboard(
     }
 
     val totalExpense = remember(filteredTransactions) {
-        filteredTransactions.sumOf { it.amount.toDouble() }.toFloat()
+        filteredTransactions
+            .filter { it.category != "Personal Transfers" }
+            .sumOf { it.amount.toDouble() }.toFloat()
     }
 
     val categorySums = remember(filteredTransactions) {
@@ -135,7 +137,9 @@ fun ExpenseTrackerDashboard(
         
         filteredTransactions.forEach { tx ->
             val cat = tx.category
-            sums[cat] = (sums[cat] ?: 0.0f) + tx.amount
+            if (cat != "Personal Transfers") {
+                sums[cat] = (sums[cat] ?: 0.0f) + tx.amount
+            }
         }
         sums
     }
@@ -313,6 +317,13 @@ fun ExpenseTrackerDashboard(
                 }
             }
         } else {
+            val personalTransfers = remember(filteredTransactions) {
+                filteredTransactions.filter { it.category == "Personal Transfers" }
+            }
+            val retailTransactions = remember(filteredTransactions) {
+                filteredTransactions.filter { it.category != "Personal Transfers" }
+            }
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -320,8 +331,19 @@ fun ExpenseTrackerDashboard(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                if (personalTransfers.isNotEmpty()) {
+                    item {
+                        PersonalTransfersSection(
+                            transfers = personalTransfers,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("personal_transfers_folder_section")
+                        )
+                    }
+                }
+
                 items(
-                    items = filteredTransactions,
+                    items = retailTransactions,
                     key = { it.id }
                 ) { transaction ->
                     TransactionItem(
@@ -330,6 +352,201 @@ fun ExpenseTrackerDashboard(
                             .fillMaxWidth()
                             .testTag("transaction_item_${transaction.id}")
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PersonalTransfersSection(
+    transfers: List<Transaction>,
+    modifier: Modifier = Modifier
+) {
+    var isParentExpanded by remember { mutableStateOf(true) }
+    var expandedPeople by remember { mutableStateOf(setOf<String>()) }
+
+    val groupedByPerson = remember(transfers) {
+        transfers.groupBy { it.merchant }
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E9E5).copy(alpha = 0.5f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEFE6E2))
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            // Expanded Master Folder Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isParentExpanded = !isParentExpanded }
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Color(0xFF5C6BC0), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("👤", fontSize = 18.sp)
+                    }
+                    Column {
+                        Text(
+                            text = "Personal Transfers",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF201A18)
+                        )
+                        Text(
+                            text = "${groupedByPerson.size} people • ${transfers.size} sent",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF85736B)
+                        )
+                    }
+                }
+
+                Icon(
+                    imageVector = if (isParentExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                    contentDescription = if (isParentExpanded) "Collapse Transfers" else "Expand Transfers",
+                    tint = Color(0xFF52443D)
+                )
+            }
+
+            AnimatedVisibility(
+                visible = isParentExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    groupedByPerson.forEach { (person, personTransfers) ->
+                        val isPersonExpanded = expandedPeople.contains(person)
+                        val totalSent = personTransfers.sumOf { it.amount.toDouble() }.toFloat()
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEFE6E2).copy(alpha = 0.8f))
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                // Person Row (Sub-folder Card header)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            expandedPeople = if (isPersonExpanded) {
+                                                expandedPeople - person
+                                            } else {
+                                                expandedPeople + person
+                                            }
+                                        }
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .background(Color(0xFFEFEFEF), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(text = "📁", fontSize = 16.sp)
+                                        }
+                                        Text(
+                                            text = person,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF201A18)
+                                        )
+                                    }
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "₹${String.format(Locale.getDefault(), "%,.2f", totalSent)}",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF5C6BC0)
+                                        )
+
+                                        Icon(
+                                            imageVector = if (isPersonExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                                            contentDescription = "Toggle folder Details",
+                                            tint = Color(0xFF85736B),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                AnimatedVisibility(
+                                    visible = isPersonExpanded,
+                                    enter = expandVertically() + fadeIn(),
+                                    exit = shrinkVertically() + fadeOut()
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color(0xFFFDF8F6))
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        personTransfers.sortedByDescending { it.timestamp }.forEach { tx ->
+                                            val formattedTime = remember(tx.timestamp) {
+                                                val sdf = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+                                                sdf.format(Date(tx.timestamp))
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = tx.item_description,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = Color(0xFF201A18)
+                                                    )
+                                                    Text(
+                                                        text = formattedTime,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = Color(0xFF85736B)
+                                                    )
+                                                }
+
+                                                Text(
+                                                    text = "₹${String.format(Locale.getDefault(), "%,.2f", tx.amount)}",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF201A18)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -600,7 +817,7 @@ fun SlidingOverlay(
                     modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
                 )
 
-                val categories = listOf("Food & Drinks", "Groceries", "Travel & Transport", "Shopping", "Bills & Utilities")
+                val categories = listOf("Food & Drinks", "Groceries & Shopping", "Travel & Transport", "Bills & Utilities", "Medical & Healthcare", "Personal Transfers", "Other")
                 
                 Row(
                     modifier = Modifier
@@ -622,10 +839,11 @@ fun SlidingOverlay(
                                     val currentText = viewModel.itemDescriptionValue.text
                                     val newText = when (cat) {
                                         "Food & Drinks" -> "Food / Drink"
-                                        "Groceries" -> "Grocery"
+                                        "Groceries & Shopping" -> "Grocery / Shopping"
                                         "Travel & Transport" -> "Fuel Travel"
-                                        "Shopping" -> "Shopping Product"
                                         "Bills & Utilities" -> "Recharge Bill"
+                                        "Medical & Healthcare" -> "Pharmacy Medical"
+                                        "Personal Transfers" -> "Send to Pavan"
                                         else -> "Item"
                                     }
                                     viewModel.itemDescriptionValue = TextFieldValue(
@@ -886,6 +1104,7 @@ fun getEmojiForCategory(category: String): String {
         "Travel & Transport" -> "🚗"
         "Bills & Utilities" -> "⚡"
         "Medical & Healthcare" -> "💊"
+        "Personal Transfers" -> "👤"
         else -> "🏷️"
     }
 }
@@ -899,6 +1118,7 @@ fun getColorForCategory(category: String): Color {
         "Travel & Transport" -> Color(0xFF4FC3F7) // Sea Blue
         "Bills & Utilities" -> Color(0xFFFFD54F) // Gold Amber
         "Medical & Healthcare" -> Color(0xFFF06292) // Rose Pink
+        "Personal Transfers" -> Color(0xFF5C6BC0) // Indigo Blue
         else -> Color(0xFF90A4AE) // Slate Grey
     }
 }

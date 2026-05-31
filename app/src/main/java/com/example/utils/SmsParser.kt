@@ -157,9 +157,77 @@ object SmsParser {
         )
     }
 
+    fun isCommonIndianName(text: String): Boolean {
+        val nameLower = text.trim().lowercase()
+        val commonNames = setOf(
+            "pavan", "amit", "rahul", "pooja", "rajesh", "suresh", "neha", "arjun", "karan", "vijay", 
+            "anjali", "priya", "deepak", "anil", "sunil", "ajay", "sanjay", "rohit", "vikas", "manoj", 
+            "abhishek", "ravi", "sharma", "singh", "kumar", "verma", "patel", "prakash", "gandhi",
+            "kiran", "tanmay", "aniket", "pranav", "nikhil", "aditya", "gaurav", "saurabh", "simran",
+            "sneha", "sapna", "shreya", "divya", "rita", "gita", "harish", "mahesh", "ramesh", "dinesh"
+        )
+        return commonNames.contains(nameLower)
+    }
+
+    fun extractRecipientName(description: String, defaultMerchant: String): String {
+        val text = description.trim()
+        val textLower = text.lowercase()
+        val prefixes = listOf("send to", "paid to", "transfer to", "sent to")
+        for (prefix in prefixes) {
+            if (textLower.startsWith(prefix)) {
+                val candidate = text.substring(prefix.length).trim()
+                if (candidate.isNotEmpty()) {
+                    return capitalizeName(candidate)
+                }
+            }
+        }
+        if (textLower.startsWith("to ")) {
+            val candidate = text.substring(3).trim()
+            if (candidate.isNotEmpty()) {
+                return capitalizeName(candidate)
+            }
+        }
+        if (isCommonIndianName(text)) {
+            return capitalizeName(text)
+        }
+        val words = text.split(" ")
+        if (words.size <= 2) {
+            val nameWord = words.find { isCommonIndianName(it) }
+            if (nameWord != null) {
+                return capitalizeName(nameWord)
+            }
+        }
+        return capitalizeName(defaultMerchant)
+    }
+
+    private fun capitalizeName(name: String): String {
+        val trimmed = name.trim().replace(Regex("\\s+"), " ")
+        if (trimmed.isEmpty()) return "Unknown"
+        var cleanName = trimmed
+        val lower = cleanName.lowercase()
+        val fluffTrailing = listOf(" via u", " using", " from")
+        for (fluff in fluffTrailing) {
+            if (lower.contains(fluff)) {
+                cleanName = cleanName.substring(0, lower.indexOf(fluff)).trim()
+            }
+        }
+        return cleanName.split(" ").joinToString(" ") { word ->
+            word.lowercase().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+        }
+    }
+
     fun mapItemToCategory(item: String): String {
-        val text = item.lowercase(Locale.ROOT)
+        val text = item.lowercase(Locale.ROOT).trim()
+        val textWords = text.split(" ")
+        val containsSenderPrefix = text.contains("send to") || text.contains("paid to") || 
+                text.contains("transfer to") || text.contains("sent to") || 
+                text.contains("transfer of") || text.startsWith("to ") || text.startsWith("transfer ")
+        
+        val isNameMatch = isCommonIndianName(text) || (textWords.isNotEmpty() && textWords.size <= 2 && textWords.any { isCommonIndianName(it) })
+
         return when {
+            containsSenderPrefix || isNameMatch -> "Personal Transfers"
+
             // Food & Drinks: tea, coffee, samosa, lunch, dinner, maggie, chai, snacks, cafe (+ original extensions)
             text.contains("tea") || text.contains("coffee") || text.contains("samosa") || 
             text.contains("lunch") || text.contains("dinner") || text.contains("maggie") || 

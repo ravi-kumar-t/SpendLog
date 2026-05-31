@@ -92,6 +92,11 @@ class MainViewModel(private val repository: ExpenseRepository) : ViewModel() {
         }
 
         val category = SmsParser.mapItemToCategory(itemText)
+        val finalMerchant = if (category == "Personal Transfers") {
+            SmsParser.extractRecipientName(itemText, currentMerchant)
+        } else {
+            currentMerchant
+        }
 
         viewModelScope.launch {
             // 1. Upsert merchant mapping
@@ -105,7 +110,7 @@ class MainViewModel(private val repository: ExpenseRepository) : ViewModel() {
             // 2. Insert transaction
             val transaction = Transaction(
                 amount = currentAmount,
-                merchant = currentMerchant,
+                merchant = finalMerchant,
                 item_description = itemText,
                 category = category,
                 timestamp = System.currentTimeMillis()
