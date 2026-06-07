@@ -17,5 +17,6 @@ data class Transaction(
     val merchant: String,
     val item_description: String,
     val category: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val type: String = "TYPE_EXPENSE"
 )

@@ -59,6 +59,23 @@ class MainViewModel(private val repository: ExpenseRepository) : ViewModel() {
     fun onSimulateUpiPayment() {
         val parsed = SmsParser.parseSms(smsInput) ?: return
         
+        if (parsed.type == "TYPE_INCOME") {
+            // It is an income, do not show overlay, but save to database directly!
+            viewModelScope.launch {
+                repository.insertTransaction(
+                    Transaction(
+                        amount = parsed.amount,
+                        merchant = if (parsed.cleanedMerchant.isNotEmpty() && parsed.cleanedMerchant != "Unknown Merchant") parsed.cleanedMerchant else "Self",
+                        item_description = "Received UPI payment",
+                        category = "Other",
+                        timestamp = System.currentTimeMillis(),
+                        type = "TYPE_INCOME"
+                    )
+                )
+            }
+            return
+        }
+
         viewModelScope.launch {
             // Find if merchant already mapped in Database
             val mapping = repository.getMerchantMapping(parsed.cleanedMerchant)
@@ -134,6 +151,41 @@ class MainViewModel(private val repository: ExpenseRepository) : ViewModel() {
         viewModelScope.launch {
             repository.clearTransactions()
             repository.clearMappings()
+        }
+    }
+
+    fun insertManualTransaction(
+        itemDescription: String,
+        amount: Float,
+        merchantName: String,
+        category: String
+    ) {
+        viewModelScope.launch {
+            val cleanedMerchant = SmsParser.cleanMerchant(merchantName)
+            val finalMerchant = if (category == "Personal Transfers") {
+                SmsParser.extractRecipientName(itemDescription, cleanedMerchant)
+            } else {
+                cleanedMerchant
+            }
+
+            // 1. Upsert merchant mapping
+            val mapping = MerchantMapping(
+                merchant_name = cleanedMerchant,
+                default_item = itemDescription,
+                default_category = category
+            )
+            repository.upsertMerchantMapping(mapping)
+
+            // 2. Insert transaction
+            val transaction = Transaction(
+                amount = amount,
+                merchant = finalMerchant,
+                item_description = itemDescription,
+                category = category,
+                timestamp = System.currentTimeMillis(),
+                type = "TYPE_EXPENSE"
+            )
+            repository.insertTransaction(transaction)
         }
     }
 

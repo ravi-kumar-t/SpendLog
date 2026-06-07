@@ -81,6 +81,7 @@ class OverlayService : Service() {
         val amount = intent?.getFloatExtra("extracted_amount", 0.0f) ?: intent?.getFloatExtra("amount", 0.0f) ?: 0.0f
         val merchantRaw = intent?.getStringExtra("extracted_merchant") ?: intent?.getStringExtra("merchant") ?: "Unknown Merchant"
         val merchantCleaned = SmsParser.cleanMerchant(merchantRaw)
+        val smsBody = intent?.getStringExtra("sms_body") ?: ""
 
         // Prelink database mapping lookup
         serviceScope.launch {
@@ -90,7 +91,7 @@ class OverlayService : Service() {
             val initialText = mapping?.default_item ?: ""
             val selection = if (initialText.isNotEmpty()) TextRange(0, initialText.length) else TextRange.Zero
 
-            setupWindow(amount, merchantCleaned, merchantRaw, initialText, selection)
+            setupWindow(amount, merchantCleaned, merchantRaw, initialText, selection, smsBody)
         }
 
         return START_NOT_STICKY
@@ -101,7 +102,8 @@ class OverlayService : Service() {
         merchantCleaned: String,
         merchantRaw: String,
         initialText: String,
-        initialSelection: TextRange
+        initialSelection: TextRange,
+        smsBody: String
     ) {
         // Remove previous instance if existing to prevent WindowManager leaks
         removeOverlay()
@@ -126,6 +128,7 @@ class OverlayService : Service() {
                         merchantRaw = merchantRaw,
                         initialText = initialText,
                         initialSelection = initialSelection,
+                        smsBody = smsBody,
                         onDismiss = {
                             stopSelf()
                         },
@@ -250,6 +253,7 @@ fun OverlayPopupScreen(
     merchantRaw: String,
     initialText: String,
     initialSelection: TextRange,
+    smsBody: String,
     onDismiss: () -> Unit,
     onConfirm: (String, String) -> Unit
 ) {
@@ -267,8 +271,57 @@ fun OverlayPopupScreen(
         keyboardController?.show()
     }
 
-    val dynamicCategory = remember(itemDescriptionValue.text) {
-        SmsParser.mapItemToCategory(itemDescriptionValue.text)
+    var selectedCategory by remember {
+        mutableStateOf(SmsParser.mapItemToCategory(itemDescriptionValue.text))
+    }
+
+    var isUserEditing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(itemDescriptionValue.text) {
+        if (isUserEditing) {
+            selectedCategory = SmsParser.mapItemToCategory(itemDescriptionValue.text)
+        }
+    }
+
+    LaunchedEffect(smsBody) {
+        if (smsBody.isNotEmpty()) {
+            try {
+                // Background AI Inference run on Dispatchers.Default with timeout
+                val inferredCategory = withContext(Dispatchers.Default) {
+                    kotlinx.coroutines.withTimeoutOrNull(300) { // Timeout 300ms fallback protection
+                        val nanoModel = com.example.utils.OnDeviceLLM()
+                        
+                        // Step 1: Intent Verification Prompt
+                        val intentPrompt = """
+                            Evaluate if money actually left the account (returning true/false) to bypass promotional layout spam safely.
+                            SMS Body: $smsBody
+                        """.trimIndent()
+                        val isDebitStr = nanoModel.generateContent(intentPrompt)
+                        val isDebit = isDebitStr.trim().lowercase().toBoolean()
+                        
+                        if (isDebit) {
+                            // Step 2: Auto-Categorization Prompt
+                            val categoryPrompt = """
+                                Analyze the text snippet and output exactly one of our system category strings:
+                                "Food & Drinks", "Groceries & Shopping", "Travel & Transport", "Bills & Utilities", "Medical & Healthcare", "Personal Transfers", "Other".
+                                SMS: $smsBody
+                            """.trimIndent()
+                            nanoModel.generateContent(categoryPrompt)
+                        } else {
+                            "Other"
+                        }
+                    }
+                }
+                
+                // If success under 300ms, update the category select container UI reactively
+                if (inferredCategory != null && inferredCategory.isNotEmpty()) {
+                    selectedCategory = inferredCategory
+                }
+            } catch (e: Exception) {
+                Log.e("OverlayService", "Local LLM failed, falling back to static mapping", e)
+                // If model fails or memory constraints or other exception, fallback already defaults to selectedCategory
+            }
+        }
     }
 
     Box(
@@ -300,7 +353,7 @@ fun OverlayPopupScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "💸 Spent ₹${String.format(Locale.getDefault(), "%.2f", amount)}",
+                        text = "Spent ₹${String.format(Locale.getDefault(), "%.2f", amount)}",
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF201A18)
@@ -349,7 +402,10 @@ fun OverlayPopupScreen(
 
             OutlinedTextField(
                 value = itemDescriptionValue,
-                onValueChange = { itemDescriptionValue = it },
+                onValueChange = { 
+                    isUserEditing = true
+                    itemDescriptionValue = it 
+                },
                 placeholder = { Text("e.g. Chai, Samosa, Spotify, Fuel", color = Color(0xFF85736B).copy(alpha = 0.6f)) },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -366,7 +422,7 @@ fun OverlayPopupScreen(
                             errorMessage = "Please describe what you purchased!"
                         } else {
                             keyboardController?.hide()
-                            onConfirm(trimmed, dynamicCategory)
+                            onConfirm(trimmed, selectedCategory)
                         }
                     }
                 ),
@@ -412,7 +468,7 @@ fun OverlayPopupScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 categories.forEach { cat ->
-                    val isActive = dynamicCategory == cat
+                    val isActive = selectedCategory == cat
                     val badgeBg = if (isActive) Color(0xFF311005) else Color.White
                     val badgeText = if (isActive) Color.White else Color(0xFF52443D)
                     val badgeBorder = if (isActive) Color(0xFF311005) else Color(0xFFD6C2BA)
@@ -421,6 +477,8 @@ fun OverlayPopupScreen(
                         modifier = Modifier
                             .background(badgeBg, RoundedCornerShape(50))
                             .clickable {
+                                isUserEditing = false
+                                selectedCategory = cat
                                 val newText = when (cat) {
                                     "Food & Drinks" -> "Food / Drink"
                                     "Groceries & Shopping" -> "Grocery / Shopping"
@@ -438,13 +496,24 @@ fun OverlayPopupScreen(
                             .border(1.dp, badgeBorder, RoundedCornerShape(50))
                             .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
-                        Text(
-                            text = "${getEmojiForCategory(cat)} $cat",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = badgeText
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = getIconForCategory(cat),
+                                contentDescription = cat,
+                                modifier = Modifier.size(16.dp),
+                                tint = badgeText
                             )
-                        )
+                            Text(
+                                text = cat,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = badgeText
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -482,7 +551,7 @@ fun OverlayPopupScreen(
                             errorMessage = "Please describe what you purchased!"
                         } else {
                             keyboardController?.hide()
-                            onConfirm(trimmed, dynamicCategory)
+                            onConfirm(trimmed, selectedCategory)
                         }
                     },
                     modifier = Modifier
