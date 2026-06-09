@@ -272,7 +272,7 @@ fun OverlayPopupScreen(
     }
 
     var selectedCategory by remember {
-        mutableStateOf(SmsParser.mapItemToCategory(itemDescriptionValue.text))
+        mutableStateOf("")
     }
 
     var isUserEditing by remember { mutableStateOf(false) }
@@ -288,7 +288,7 @@ fun OverlayPopupScreen(
             try {
                 // Background AI Inference run on Dispatchers.Default with timeout
                 val inferredCategory = withContext(Dispatchers.Default) {
-                    kotlinx.coroutines.withTimeoutOrNull(300) { // Timeout 300ms fallback protection
+                    kotlinx.coroutines.withTimeoutOrNull(600) { // Timeout 600ms fallback protection
                         val nanoModel = com.example.utils.OnDeviceLLM()
                         
                         // Step 1: Intent Verification Prompt
@@ -301,26 +301,25 @@ fun OverlayPopupScreen(
                         
                         if (isDebit) {
                             // Step 2: Auto-Categorization Prompt
-                            val categoryPrompt = """
-                                Analyze the text snippet and output exactly one of our system category strings:
-                                "Food & Drinks", "Groceries & Shopping", "Travel & Transport", "Bills & Utilities", "Medical & Healthcare", "Personal Transfers", "Other".
-                                SMS: $smsBody
-                            """.trimIndent()
-                            nanoModel.generateContent(categoryPrompt)
+                            nanoModel.generateContent("auto-categorization of: $smsBody")
                         } else {
                             "Other"
                         }
                     }
                 }
                 
-                // If success under 300ms, update the category select container UI reactively
+                // If success under 600ms, update the category select container UI reactively
                 if (inferredCategory != null && inferredCategory.isNotEmpty()) {
                     selectedCategory = inferredCategory
+                } else {
+                    selectedCategory = SmsParser.mapItemToCategory(itemDescriptionValue.text)
                 }
             } catch (e: Exception) {
                 Log.e("OverlayService", "Local LLM failed, falling back to static mapping", e)
-                // If model fails or memory constraints or other exception, fallback already defaults to selectedCategory
+                selectedCategory = SmsParser.mapItemToCategory(itemDescriptionValue.text)
             }
+        } else {
+            selectedCategory = SmsParser.mapItemToCategory(itemDescriptionValue.text)
         }
     }
 
@@ -422,7 +421,8 @@ fun OverlayPopupScreen(
                             errorMessage = "Please describe what you purchased!"
                         } else {
                             keyboardController?.hide()
-                            onConfirm(trimmed, selectedCategory)
+                            val finalCategory = if (selectedCategory.isNotEmpty()) selectedCategory else SmsParser.mapItemToCategory(trimmed).let { if (it.isEmpty()) "Other" else it }
+                            onConfirm(trimmed, finalCategory)
                         }
                     }
                 ),
@@ -551,7 +551,8 @@ fun OverlayPopupScreen(
                             errorMessage = "Please describe what you purchased!"
                         } else {
                             keyboardController?.hide()
-                            onConfirm(trimmed, selectedCategory)
+                            val finalCategory = if (selectedCategory.isNotEmpty()) selectedCategory else SmsParser.mapItemToCategory(trimmed).let { if (it.isEmpty()) "Other" else it }
+                            onConfirm(trimmed, finalCategory)
                         }
                     },
                     modifier = Modifier

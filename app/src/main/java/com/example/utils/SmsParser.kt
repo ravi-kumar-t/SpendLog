@@ -14,6 +14,163 @@ data class ParsedTransaction(
 
 object SmsParser {
 
+    val CAMPUS_VOCABULARY = mapOf(
+        "Lassi" to "Food & Drinks",
+        "Milk" to "Food & Drinks",
+        "Ice cream" to "Food & Drinks",
+        "Icecream" to "Food & Drinks",
+        "Juice" to "Food & Drinks",
+        "Food" to "Food & Drinks",
+        "Fruits" to "Food & Drinks",
+        "Fruits Salad" to "Food & Drinks",
+        "Water" to "Food & Drinks",
+        "Tea" to "Food & Drinks",
+        "Coffee" to "Food & Drinks",
+        "Maggie" to "Food & Drinks",
+        "Biscuit" to "Food & Drinks",
+        "Chips" to "Food & Drinks",
+        "Lays" to "Food & Drinks",
+        "Cool Drinks" to "Food & Drinks",
+        "Pepsi" to "Food & Drinks",
+        "Thumps Up" to "Food & Drinks",
+        "Coke" to "Food & Drinks",
+        "Limka" to "Food & Drinks",
+        "Fanta" to "Food & Drinks",
+        "Chicken" to "Food & Drinks",
+        "Mandi" to "Food & Drinks",
+        "Noodles" to "Food & Drinks",
+        "Roti" to "Food & Drinks",
+        "Rice" to "Food & Drinks",
+        "Panneer" to "Food & Drinks",
+        "Tiffins" to "Food & Drinks",
+        "Idly" to "Food & Drinks",
+        "Dosa" to "Food & Drinks",
+        "Butter Milk" to "Food & Drinks",
+        "Bubble Gum" to "Food & Drinks",
+        "Biriyani" to "Food & Drinks",
+        "Mango" to "Food & Drinks",
+        "Watermelon" to "Food & Drinks",
+        "Muskmelon" to "Food & Drinks",
+        "Litchi" to "Food & Drinks",
+        "Jamun" to "Food & Drinks",
+        "Papaya" to "Food & Drinks",
+        "Pineapple" to "Food & Drinks",
+        "Coconut" to "Food & Drinks",
+        "Plum" to "Food & Drinks",
+        "Pear" to "Food & Drinks",
+        "Apple" to "Food & Drinks",
+        "Pomegranate" to "Food & Drinks",
+        "Guava" to "Food & Drinks",
+        "Grapes" to "Food & Drinks",
+        "Cherry" to "Food & Drinks",
+        "Dragon Fruit" to "Food & Drinks",
+        "Kiwi" to "Food & Drinks",
+        "Orange" to "Food & Drinks",
+        "Sweet Lime" to "Food & Drinks",
+        "Jackfruit" to "Food & Drinks",
+        "Soap" to "Groceries & Shopping",
+        "Shampoo" to "Groceries & Shopping",
+        "Toothpaste" to "Groceries & Shopping",
+        "Brush" to "Groceries & Shopping",
+        "Body Wash" to "Groceries & Shopping",
+        "Scrub" to "Groceries & Shopping",
+        "Towel" to "Groceries & Shopping",
+        "Laundry detergent" to "Groceries & Shopping",
+        "Surf" to "Groceries & Shopping",
+        "Bucket" to "Groceries & Shopping",
+        "Mug" to "Groceries & Shopping",
+        "Vegetables" to "Groceries & Shopping",
+        "Pens" to "Stationaries & Education",
+        "Notebooks" to "Stationaries & Education",
+        "Books" to "Stationaries & Education",
+        "Pen" to "Stationaries & Education",
+        "Notebook" to "Stationaries & Education",
+        "Book" to "Stationaries & Education",
+        "Calculators" to "Stationaries & Education",
+        "Project materials" to "Stationaries & Education",
+        "Assignment Printouts" to "Stationaries & Education",
+        "Eraser" to "Stationaries & Education",
+        "Certification exam" to "Stationaries & Education",
+        "Xerox" to "Stationaries & Education",
+        "Auto" to "Travel & Transport",
+        "Ekart" to "Travel & Transport",
+        "Rapido" to "Travel & Transport",
+        "Uber" to "Travel & Transport",
+        "Bus" to "Travel & Transport",
+        "Train" to "Travel & Transport",
+        "Petrol" to "Travel & Transport",
+        "Parking fees" to "Travel & Transport",
+        "Mobile recharge" to "Bills & Utilities",
+        "Recharge" to "Bills & Utilities",
+        "Rent" to "Bills & Utilities",
+        "Medicines" to "Medical & Healthcare",
+        "Clinic visits" to "Medical & Healthcare",
+        "Doctor fees" to "Medical & Healthcare",
+        "Tablets" to "Medical & Healthcare",
+        "Sent to friend" to "Personal Transfers",
+        "Split" to "Personal Transfers",
+        "Borrowed money returned" to "Personal Transfers",
+        "Haircut" to "Other",
+        "Movie" to "Other"
+    )
+
+    fun getSingularForm(input: String): String? {
+        val lower = input.lowercase(Locale.ROOT)
+        // Exempt explicit master entries ending in 's' (such as "Lays", "Chips", "Tiffins")
+        val exemptKeys = CAMPUS_VOCABULARY.keys.map { it.lowercase(Locale.ROOT) }.filter { it.endsWith("s") }
+        if (exemptKeys.contains(lower)) {
+            return null
+        }
+        
+        if (lower.endsWith("es") && lower.length > 2) {
+            return input.substring(0, input.length - 2)
+        } else if (lower.endsWith("s") && lower.length > 1) {
+            return input.substring(0, input.length - 1)
+        }
+        return null
+    }
+
+    fun matchVocabulary(text: String): Map.Entry<String, String>? {
+        val cleanedText = text.trim()
+        if (cleanedText.isEmpty()) return null
+        
+        val lowerText = cleanedText.lowercase(Locale.ROOT)
+        val spaceAgnosticInput = lowerText.replace(" ", "")
+        
+        // Exact match with space-agnostic fallback
+        val exactMatch = CAMPUS_VOCABULARY.entries.firstOrNull { 
+            it.key.lowercase(Locale.ROOT) == lowerText || 
+            it.key.lowercase(Locale.ROOT).replace(" ", "") == spaceAgnosticInput
+        }
+        if (exactMatch != null) return exactMatch
+        
+        // Prefix match with space-agnostic fallback
+        val prefixMatch = CAMPUS_VOCABULARY.entries.firstOrNull { 
+            it.key.lowercase(Locale.ROOT).startsWith(lowerText) || 
+            it.key.lowercase(Locale.ROOT).replace(" ", "").startsWith(spaceAgnosticInput)
+        }
+        if (prefixMatch != null) return prefixMatch
+        
+        // Try singular clone checks
+        val singularForm = getSingularForm(lowerText)
+        if (singularForm != null) {
+            val spaceAgnosticSingular = singularForm.replace(" ", "")
+            val exactSingularMatch = CAMPUS_VOCABULARY.entries.firstOrNull { 
+                it.key.lowercase(Locale.ROOT) == singularForm || 
+                it.key.lowercase(Locale.ROOT).replace(" ", "") == spaceAgnosticSingular
+            }
+            if (exactSingularMatch != null) return exactSingularMatch
+            
+            val prefixSingularMatch = CAMPUS_VOCABULARY.entries.firstOrNull { 
+                it.key.lowercase(Locale.ROOT).startsWith(singularForm) || 
+                it.key.lowercase(Locale.ROOT).replace(" ", "").startsWith(spaceAgnosticSingular)
+            }
+            if (prefixSingularMatch != null) return prefixSingularMatch
+        }
+        
+        return null
+    }
+
     fun cleanMerchant(raw: String): String {
         var name = raw.trim()
 
@@ -298,6 +455,9 @@ object SmsParser {
 
     fun mapItemToCategory(item: String): String {
         val text = item.lowercase(Locale.ROOT).trim()
+        val vMatch = matchVocabulary(text)
+        if (vMatch != null) return vMatch.value
+ 
         val textWords = text.split(" ")
         val containsSenderPrefix = text.contains("send to") || text.contains("paid to") || 
                 text.contains("transfer to") || text.contains("sent to") || 
@@ -308,7 +468,8 @@ object SmsParser {
         return when {
             containsSenderPrefix || isNameMatch -> "Personal Transfers"
 
-            // Food & Drinks: tea, coffee, samosa, lunch, dinner, maggie, chai, snacks, cafe (+ original extensions)
+            // Food & Drinks: milk, lassi, chicken, tea, coffee, samosa, lunch, dinner, maggie, chai, snacks, cafe (+ original extensions)
+            text.contains("milk") || text.contains("lassi") || text.contains("chicken") ||
             text.contains("tea") || text.contains("coffee") || text.contains("samosa") || 
             text.contains("lunch") || text.contains("dinner") || text.contains("maggie") || 
             text.contains("maggi") || text.contains("chai") || text.contains("snacks") || 
@@ -325,9 +486,9 @@ object SmsParser {
             text.contains("diesel") || text.contains("taxi") || text.contains("bus") || 
             text.contains("ticket") || text.contains("flight") -> "Travel & Transport"
 
-            // Groceries & Shopping: dmart, blinkit, instamart, milk, vegetables, clothes, amazon (+ original extensions)
-            text.contains("dmart") || text.contains("d-mart") || text.contains("blinkit") || 
-            text.contains("instamart") || text.contains("milk") || text.contains("vegetables") || 
+            // Groceries & Shopping: dmart, blinkit, instamart, book, vegetables, clothes, amazon (+ original extensions)
+            text.contains("book") || text.contains("dmart") || text.contains("d-mart") || text.contains("blinkit") || 
+            text.contains("instamart") || text.contains("vegetables") || 
             text.contains("clothes") || text.contains("amazon") || text.contains("grocery") || 
             text.contains("groceries") || text.contains("shopping") || text.contains("mart") || 
             text.contains("supermarket") || text.contains("zepto") || text.contains("bigbasket") || 
@@ -386,7 +547,19 @@ class OnDeviceLLM {
         
         // 2. Auto-Categorization Prompt
         if (promptClean.contains("category") || promptClean.contains("auto-categorization")) {
-            return predictCategorySemantically(promptClean)
+            var payload = when {
+                promptClean.contains("of:") -> promptClean.substringAfter("of:").trim()
+                promptClean.contains("sms:") -> promptClean.substringAfter("sms:").trim()
+                promptClean.contains("of sms:") -> promptClean.substringAfter("of sms:").trim()
+                promptClean.contains("of ") -> promptClean.substringAfter("of ").trim()
+                else -> promptClean
+            }
+            if (payload.contains("(system instructions:")) {
+                payload = payload.substringBefore("(system instructions:").trim()
+            } else if (payload.contains("system instructions:")) {
+                payload = payload.substringBefore("system instructions:").trim()
+            }
+            return predictCategorySemantically(payload)
         }
         
         return "Other"
@@ -394,12 +567,28 @@ class OnDeviceLLM {
 
     private fun predictCategorySemantically(prompt: String): String {
         return when {
+            prompt.contains("milk") || prompt.contains("lassi") || prompt.contains("chicken") ||
             prompt.contains("chai") || prompt.contains("tea") || prompt.contains("coffee") || 
             prompt.contains("juice") || prompt.contains("cafe") || prompt.contains("food") || 
             prompt.contains("restaurant") || prompt.contains("dining") || prompt.contains("samosa") || 
             prompt.contains("mcd") || prompt.contains("starbucks") || prompt.contains("biryani") ||
-            prompt.contains("hotel") || prompt.contains("maggi") -> "Food & Drinks"
+            prompt.contains("hotel") || prompt.contains("maggi") ||
+            prompt.contains("banana") || prompt.contains("apple") || prompt.contains("orange") ||
+            prompt.contains("mango") || prompt.contains("fruit") || prompt.contains("fruits") ||
+            prompt.contains("vegetable") || prompt.contains("vegetables") || prompt.contains("tomato") ||
+            prompt.contains("potato") || prompt.contains("onion") || prompt.contains("snack") ||
+            prompt.contains("snacks") || prompt.contains("meat") || prompt.contains("meats") ||
+            prompt.contains("mutton") || prompt.contains("fish") || prompt.contains("egg") ||
+            prompt.contains("eggs") || prompt.contains("rice") || prompt.contains("wheat") ||
+            prompt.contains("flour") || prompt.contains("curd") || prompt.contains("butter") ||
+            prompt.contains("cheese") || prompt.contains("ingredient") || prompt.contains("ingredients") -> "Food & Drinks"
             
+            prompt.contains("t-shirt") || prompt.contains("shirt") || prompt.contains("clothing") ||
+            prompt.contains("apparel") || prompt.contains("jeans") || prompt.contains("dress") ||
+            prompt.contains("footwear") || prompt.contains("bags") || prompt.contains("bag") ||
+            prompt.contains("shoe") || prompt.contains("shoes") -> "Apparel & Clothing"
+
+            prompt.contains("book") ||
             prompt.contains("dmart") || prompt.contains("blinkit") || prompt.contains("zepto") || 
             prompt.contains("instamart") || prompt.contains("grocery") || prompt.contains("shopping") || 
             prompt.contains("amazon") || prompt.contains("flipkart") || prompt.contains("clothes") ||
@@ -421,8 +610,63 @@ class OnDeviceLLM {
             prompt.contains("send to") || prompt.contains("paid to") || prompt.contains("transfer") || 
             prompt.contains("pavan") || prompt.contains("amit") || prompt.contains("rahul") ||
             prompt.contains("remittance") || prompt.contains("upi to") -> "Personal Transfers"
+
+            // Dynamic Category Creation (generate brand-new, highly relevant 2-word names on-the-fly)
+            prompt.contains("haircut") || prompt.contains("salon") || prompt.contains("spa") || 
+            prompt.contains("shampoo") || prompt.contains("trimmer") || prompt.contains("makeup") || 
+            prompt.contains("barber") -> "Personal Care"
             
-            else -> "Other"
+            prompt.contains("laptop") || prompt.contains("iphone") || prompt.contains("phone") || 
+            prompt.contains("headphone") || prompt.contains("mouse") || prompt.contains("keyboard") || 
+            prompt.contains("monitor") || prompt.contains("charger") || prompt.contains("electronics") || 
+            prompt.contains("tv") || prompt.contains("gadget") || prompt.contains("appliance") ||
+            prompt.contains("electronic") -> "Electronics"
+            
+            prompt.contains("gym") || prompt.contains("football") || prompt.contains("cricket") || 
+            prompt.contains("badminton") || prompt.contains("shoes") || prompt.contains("adidas") || 
+            prompt.contains("nike") || prompt.contains("fitbit") || prompt.contains("sports") || 
+            prompt.contains("workout") -> "Sports & Fitness"
+            
+            prompt.contains("movie") || prompt.contains("cinema") || prompt.contains("theatre") || 
+            prompt.contains("bookmyshow") || prompt.contains("ticket") || prompt.contains("game") || 
+            prompt.contains("arcade") || prompt.contains("concert") || prompt.contains("show") -> "Entertainment"
+            
+            prompt.contains("book") || prompt.contains("course") || prompt.contains("college") || 
+            prompt.contains("school") || prompt.contains("udemy") || prompt.contains("tuition") || 
+            prompt.contains("stationery") || prompt.contains("exam") || prompt.contains("class") ||
+            prompt.contains("pen") || prompt.contains("notebook") || prompt.contains("textbook") ||
+            prompt.contains("calculator") || prompt.contains("pencil") -> "Education"
+            
+            prompt.contains("tool") || prompt.contains("hardware") || prompt.contains("paint") || 
+            prompt.contains("screw") || prompt.contains("plumber") || prompt.contains("drill") -> "Hardware & Tools"
+            
+            prompt.contains("stock") || prompt.contains("mutual fund") || prompt.contains("sip") || 
+            prompt.contains("groww") || prompt.contains("zerodha") || prompt.contains("invest") || 
+            prompt.contains("gold") -> "Investments"
+            
+            prompt.contains("gift") || prompt.contains("delivery") || prompt.contains("donation") || 
+            prompt.contains("charity") || prompt.contains("tip") || prompt.contains("gifting") -> "Gifts & Donations"
+            
+            prompt.contains("laundry") || prompt.contains("dry clean") || prompt.contains("washing") -> "Laundry Services"
+            
+            else -> {
+                // If it doesn't match any existing category, dynamically derive dry 2-word title representation
+                // from the prompt words to avoid "Other" fallback.
+                val cleanWords = prompt.split(Regex("[^a-zA-Z]")).filter { 
+                    it.length > 2 && it != "sms" && it != "item" && it != "items" && it != "description" && 
+                    !it.equals("shopping", ignoreCase = true) && !it.equals("expenses", ignoreCase = true)
+                }
+                if (cleanWords.size >= 2) {
+                    val w1 = cleanWords[0].replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+                    val w2 = cleanWords[1].replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+                    "$w1 $w2"
+                } else if (cleanWords.size == 1) {
+                    val w1 = cleanWords[0].replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+                    w1
+                } else {
+                    "Generic Care"
+                }
+            }
         }
     }
 }

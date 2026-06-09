@@ -1,8 +1,10 @@
 package com.example
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.*
@@ -38,11 +40,18 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.input.key.*
+import androidx.compose.foundation.BorderStroke
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.AppDatabase
 import com.example.data.ExpenseRepository
@@ -54,6 +63,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 enum class AppScreen {
+    HOME,
     DASHBOARD,
     CATEGORIES,
     CATEGORIES_DETAIL
@@ -143,6 +153,16 @@ fun ExpenseTrackerDashboard(
 
     var showManualEntry by remember { mutableStateOf(false) }
 
+    BackHandler(enabled = currentScreen == AppScreen.CATEGORIES_DETAIL) {
+        // Clear the deep-link pointer target and route safely back to the home main feed screen
+        viewModel.clearCategorySelection() 
+        currentScreen = AppScreen.HOME 
+    }
+
+    BackHandler(enabled = currentScreen == AppScreen.CATEGORIES) {
+        currentScreen = AppScreen.HOME
+    }
+
     val filteredTransactions = remember(transactionList, selectedMonth) {
         val sdfMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
         transactionList.filter {
@@ -151,7 +171,7 @@ fun ExpenseTrackerDashboard(
     }
 
     val categoryStats = remember(filteredTransactions) {
-        val categories = listOf(
+        val baseCategories = listOf(
             "Food & Drinks",
             "Groceries & Shopping",
             "Travel & Transport",
@@ -160,7 +180,10 @@ fun ExpenseTrackerDashboard(
             "Other",
             "Personal Transfers"
         )
-        categories.map { cat ->
+        val transactionCategories = filteredTransactions.map { it.category }.distinct()
+        val allCategories = (baseCategories + transactionCategories).distinct()
+
+        allCategories.map { cat ->
             val txs = filteredTransactions.filter { it.category == cat && it.type != "TYPE_INCOME" }
             CategoryCardInfo(
                 name = cat,
@@ -196,7 +219,7 @@ fun ExpenseTrackerDashboard(
         modifier = modifier.fillMaxSize()
     ) { screen ->
         when (screen) {
-            AppScreen.DASHBOARD -> {
+            AppScreen.HOME, AppScreen.DASHBOARD -> {
                 Scaffold(
                     floatingActionButton = {
                         FloatingActionButton(
@@ -228,7 +251,7 @@ fun ExpenseTrackerDashboard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 12.dp)
+                .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 0.dp)
         ) {
             Card(
                 modifier = Modifier
@@ -241,7 +264,7 @@ fun ExpenseTrackerDashboard(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(24.dp)
+                        .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -332,17 +355,21 @@ fun ExpenseTrackerDashboard(
             }
         }
 
+        Spacer(modifier = Modifier.height(11.dp))
+
         // --- Category Filter Panel of Buttons ---
         CategoryFilterPanel(
             selectedCategory = selectedCategoryFilter,
             onCategorySelected = { selectedCategoryFilter = it }
         )
 
+        Spacer(modifier = Modifier.height(0.dp))
+
         // --- 3. Header & Clear Button ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 0.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -354,7 +381,7 @@ fun ExpenseTrackerDashboard(
             )
 
             TextButton(
-                onClick = { viewModel.onClearDatabase() },
+                onClick = { viewModel.triggerClearConfirmation() },
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = MaterialTheme.colorScheme.error
                 ),
@@ -413,22 +440,12 @@ fun ExpenseTrackerDashboard(
                 }
             }
         } else {
-            val personalTransfers = remember(filteredTransactions, selectedCategoryFilter) {
-                if (selectedCategoryFilter == "All" || selectedCategoryFilter == "Personal Transfers") {
-                    filteredTransactions.filter { it.category == "Personal Transfers" }
-                } else {
-                    emptyList()
-                }
-            }
-            val retailTransactions = remember(filteredTransactions, selectedCategoryFilter) {
+            val listToRender = remember(filteredTransactions, selectedCategoryFilter) {
                 if (selectedCategoryFilter == "All") {
-                    filteredTransactions.filter { it.category != "Personal Transfers" }
+                    filteredTransactions
                 } else {
                     filteredTransactions.filter { it.category == selectedCategoryFilter }
-                }
-            }
-            val groupedMerchants = remember(retailTransactions) {
-                retailTransactions.groupBy { it.merchant }
+                }.sortedByDescending { it.timestamp }
             }
 
             LazyColumn(
@@ -438,47 +455,13 @@ fun ExpenseTrackerDashboard(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (personalTransfers.isNotEmpty()) {
-                    item {
-                        PersonalTransfersSection(
-                            transfers = personalTransfers,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("personal_transfers_folder_section")
-                        )
-                    }
-                }
-
-                groupedMerchants.forEach { (merchantName, merchantTransactions) ->
-                    if (merchantTransactions.size > 1) {
-                        item(key = "merchant_group_$merchantName") {
-                            MerchantGroupFolder(
-                                merchantName = merchantName,
-                                transactions = merchantTransactions,
-                                isExpanded = expandedMerchants.contains(merchantName),
-                                onToggleExpanded = {
-                                    expandedMerchants = if (expandedMerchants.contains(merchantName)) {
-                                        expandedMerchants - merchantName
-                                    } else {
-                                        expandedMerchants + merchantName
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("merchant_group_folder_$merchantName")
-                            )
-                        }
-                    } else {
-                        val transaction = merchantTransactions.first()
-                        item(key = "flat_tx_${transaction.id}") {
-                            TransactionItem(
-                                transaction = transaction,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("transaction_item_${transaction.id}")
-                            )
-                        }
-                    }
+                items(listToRender, key = { it.id }) { transaction ->
+                    TransactionItem(
+                        transaction = transaction,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("transaction_item_${transaction.id}")
+                    )
                 }
             }
         }
@@ -500,7 +483,7 @@ fun ExpenseTrackerDashboard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
-                            onClick = { currentScreen = AppScreen.DASHBOARD },
+                            onClick = { currentScreen = AppScreen.HOME },
                             modifier = Modifier.testTag("categories_back_button")
                         ) {
                             Icon(
@@ -661,7 +644,10 @@ fun ExpenseTrackerDashboard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
-                            onClick = { currentScreen = AppScreen.CATEGORIES },
+                            onClick = {
+                                viewModel.clearCategorySelection()
+                                currentScreen = AppScreen.HOME
+                            },
                             modifier = Modifier.testTag("categories_detail_back_button")
                         ) {
                             Icon(
@@ -832,15 +818,100 @@ fun ExpenseTrackerDashboard(
         }
     }
 
+    if (viewModel.showClearConfirmationDialog) {
+        Dialog(
+            onDismissRequest = { viewModel.dismissClearConfirmation() }
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .testTag("clear_confirmation_dialog"),
+                shape = RoundedCornerShape(28.dp),
+                color = Color(0xFF201A18)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        text = "Clear History?",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    
+                    Text(
+                        text = "This will permanently delete your local transaction ledger. This action cannot be undone.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFFE6DCD8)
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = { viewModel.dismissClearConfirmation() }
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color(0xFF9E928F),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.width(12.dp))
+                        
+                        TextButton(
+                            onClick = {
+                                viewModel.confirmClearDatabase()
+                            },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = Color(0xFFFFB4AB)
+                            )
+                        ) {
+                            Text(
+                                text = "Clear",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if (showManualEntry) {
         var itemDescription by remember { mutableStateOf("") }
         var amountText by remember { mutableStateOf("") }
         var merchantInput by remember { mutableStateOf("") }
-        var selectedCategory by remember { mutableStateOf("Food & Drinks") }
+        val selectedCategory = viewModel.predictedCategory
         var validationError by remember { mutableStateOf("") }
 
+        val trimmedDesc = itemDescription.trim()
+        val vocabMatch = if (trimmedDesc.isEmpty()) null else SmsParser.matchVocabulary(trimmedDesc)
+        val suggestionWord = vocabMatch?.key ?: ""
+        val suggestionSuffix = if (suggestionWord.isNotEmpty() && suggestionWord.length > itemDescription.length) {
+            val lowerWord = suggestionWord.lowercase(Locale.ROOT)
+            val lowerInput = itemDescription.lowercase(Locale.ROOT)
+            if (lowerWord.startsWith(lowerInput)) {
+                suggestionWord.substring(itemDescription.length)
+            } else ""
+        } else ""
+
+        LaunchedEffect(itemDescription) {
+            viewModel.predictCategoryForInput(itemDescription)
+        }
+
         Dialog(
-            onDismissRequest = { showManualEntry = false }
+            onDismissRequest = {
+                showManualEntry = false
+                viewModel.clearPrediction()
+            }
         ) {
             Surface(
                 modifier = Modifier
@@ -871,7 +942,10 @@ fun ExpenseTrackerDashboard(
                             )
                         )
                         IconButton(
-                            onClick = { showManualEntry = false },
+                            onClick = {
+                                showManualEntry = false
+                                viewModel.clearPrediction()
+                            },
                             modifier = Modifier.testTag("manual_entry_close_button")
                         ) {
                             Icon(
@@ -895,12 +969,33 @@ fun ExpenseTrackerDashboard(
                         )
                         OutlinedTextField(
                             value = itemDescription,
-                            onValueChange = { itemDescription = it },
+                            onValueChange = { inputString ->
+                                // 1. Immediately write the typed characters to your active string state tracker variable
+                                itemDescription = inputString 
+                                
+                                // 2. Explicitly kick off the ViewModel auto-categorization method right on the change event loop
+                                viewModel.predictCategoryForInput(inputString)
+                            },
                             placeholder = { Text("e.g. Snacks, Coffee, Taxi", color = Color(0xFF85736B).copy(alpha = 0.6f)) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("manual_item_input"),
+                                .testTag("manual_item_input")
+                                .onKeyEvent { keyEvent ->
+                                    if (keyEvent.type == KeyEventType.KeyDown && 
+                                        (keyEvent.key == Key.Tab || keyEvent.key == Key.Enter)) {
+                                        if (suggestionWord.isNotEmpty() && suggestionSuffix.isNotEmpty()) {
+                                            itemDescription = suggestionWord
+                                            viewModel.predictCategoryForInput(suggestionWord)
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                },
                             singleLine = true,
+                            visualTransformation = SuggestionVisualTransformation(suggestionSuffix),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedContainerColor = Color(0xFFF3E9E5),
@@ -911,6 +1006,48 @@ fun ExpenseTrackerDashboard(
                                 unfocusedTextColor = Color(0xFF201A18)
                             )
                         )
+                        if (suggestionWord.isNotEmpty() && suggestionSuffix.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.padding(top = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Press Tab/Enter or tap to complete:",
+                                    style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF85736B).copy(alpha = 0.8f), fontSize = 11.sp)
+                                )
+                                Surface(
+                                    onClick = {
+                                        itemDescription = suggestionWord
+                                        viewModel.predictCategoryForInput(suggestionWord)
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF311005).copy(alpha = 0.08f),
+                                    border = BorderStroke(1.dp, Color(0xFF311005).copy(alpha = 0.2f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = suggestionWord,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFF311005),
+                                                fontSize = 11.sp
+                                            )
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Complete",
+                                            tint = Color(0xFF311005),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // 2. Amount and Where did you pay side by side OR stacked
@@ -997,7 +1134,7 @@ fun ExpenseTrackerDashboard(
                             )
                         )
 
-                        val manualCategories = listOf(
+                        val baseCategories = listOf(
                             "Food & Drinks",
                             "Groceries & Shopping",
                             "Travel & Transport",
@@ -1006,6 +1143,21 @@ fun ExpenseTrackerDashboard(
                             "Personal Transfers",
                             "Other"
                         )
+                        val manualCategories = if (selectedCategory.isNotEmpty() && !baseCategories.contains(selectedCategory)) {
+                            baseCategories + selectedCategory
+                        } else {
+                            baseCategories
+                        }
+                        val sortedCategories = if (selectedCategory.isNotEmpty()) {
+                            val matchedCat = manualCategories.firstOrNull { it.equals(selectedCategory, ignoreCase = true) }
+                            if (matchedCat != null) {
+                                listOf(matchedCat) + manualCategories.filter { !it.equals(selectedCategory, ignoreCase = true) }
+                            } else {
+                                manualCategories
+                            }
+                        } else {
+                            manualCategories
+                        }
 
                         Row(
                             modifier = Modifier
@@ -1013,7 +1165,7 @@ fun ExpenseTrackerDashboard(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            manualCategories.forEach { cat ->
+                            sortedCategories.forEach { cat ->
                                 val isActive = selectedCategory == cat
                                 val badgeBg = if (isActive) Color(0xFF311005) else Color.White
                                 val badgeText = if (isActive) Color.White else Color(0xFF52443D)
@@ -1022,7 +1174,7 @@ fun ExpenseTrackerDashboard(
                                 Box(
                                     modifier = Modifier
                                         .background(badgeBg, RoundedCornerShape(50))
-                                        .clickable { selectedCategory = cat }
+                                        .clickable { viewModel.setPredictedCategoryManually(cat) }
                                         .border(1.dp, badgeBorder, RoundedCornerShape(50))
                                         .padding(horizontal = 12.dp, vertical = 6.dp)
                                         .testTag("manual_category_chip_$cat")
@@ -1073,18 +1225,19 @@ fun ExpenseTrackerDashboard(
                             } else if (trimmedMerchant.isEmpty()) {
                                 validationError = "Please specify where you paid!"
                             } else {
+                                val finalCategory = if (selectedCategory.isNotEmpty()) selectedCategory else "Other"
                                 viewModel.insertManualTransaction(
                                     itemDescription = trimmedItem,
                                     amount = amt,
                                     merchantName = trimmedMerchant,
-                                    category = selectedCategory
+                                    category = finalCategory
                                 )
                                 showManualEntry = false
                                 // reset states
                                 itemDescription = ""
                                 amountText = ""
                                 merchantInput = ""
-                                selectedCategory = "Food & Drinks"
+                                viewModel.clearPrediction()
                                 validationError = ""
                             }
                         },
@@ -1961,17 +2114,10 @@ fun CategoryFilterPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 0.dp)
     ) {
-        Text(
-            text = "Filter by Category",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF201A18),
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        
         androidx.compose.foundation.lazy.LazyRow(
+            modifier = Modifier.padding(top = 0.dp, bottom = 0.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(end = 16.dp)
         ) {
@@ -2052,5 +2198,34 @@ fun getColorForCategory(category: String): Color {
         "Medical & Healthcare" -> Color(0xFFF06292) // Rose Pink
         "Personal Transfers" -> Color(0xFF5C6BC0) // Indigo Blue
         else -> Color(0xFF90A4AE) // Slate Grey
+    }
+}
+
+class SuggestionVisualTransformation(private val suggestionSuffix: String) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val originalText = text.text
+        if (suggestionSuffix.isEmpty()) {
+            return TransformedText(text, OffsetMapping.Identity)
+        }
+        val annotatedString = AnnotatedString.Builder().apply {
+            append(originalText)
+            pushStyle(SpanStyle(color = Color.Gray.copy(alpha = 0.6f)))
+            append(suggestionSuffix)
+            pop()
+        }.toAnnotatedString()
+
+        val offsetMapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int {
+                return offset
+            }
+            override fun transformedToOriginal(offset: Int): Int {
+                if (offset > originalText.length) {
+                    return originalText.length
+                }
+                return offset
+            }
+        }
+
+        return TransformedText(annotatedString, offsetMapping)
     }
 }
